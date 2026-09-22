@@ -2,7 +2,7 @@
 
 A powerful, fully browser-based data cleaning tool. No installation, no server, no backend — everything runs locally in your browser.
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-GitHub%20Pages-cyan?style=flat-square)](https://DannyLexi.github.io/cleanlx)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-GitHub%20Pages-cyan?style=flat-square)](https://dannylexi.github.io/Cleanlx/)
 
 ---
 
