@@ -1,0 +1,1590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CleanLx — Data Cleaning Workbench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.js"></script>
+<style>
+  :root {
+    --navy: #0F1729; --navy-mid: #1E2D4A; --navy-light: #2A3D60;
+    --cyan: #00D4FF; --cyan-dim: #00A8CC; --slate: #8896B3;
+    --off-white: #EDF2F7; --white: #F8FAFC;
+    --green: #10B981; --amber: #F59E0B; --red: #EF4444; --purple: #8B5CF6;
+    --border: rgba(136,150,179,0.18);
+    --mono: 'JetBrains Mono', monospace; --sans: 'Inter', sans-serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--navy); color: var(--off-white); font-family: var(--sans); font-size: 14px; }
+  .app { display: grid; grid-template-rows: 52px 1fr; height: 100vh; overflow: hidden; }
+  .topbar {
+    background: var(--navy-mid); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 12px; padding: 0 20px;
+  }
+  .logo { font-weight: 700; font-size: 15px; letter-spacing: -0.3px; color: var(--white); }
+  .logo span { color: var(--cyan); }
+  .badge {
+    font-size: 10px; font-weight: 600; background: rgba(0,212,255,0.12);
+    color: var(--cyan); border: 1px solid rgba(0,212,255,0.3);
+    padding: 2px 7px; border-radius: 20px; letter-spacing: 0.5px;
+  }
+  .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  .workspace { display: grid; grid-template-columns: 300px 1fr; overflow: hidden; }
+  .panel-left {
+    background: var(--navy-mid); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow-y: auto;
+  }
+  .panel-section { padding: 16px; border-bottom: 1px solid var(--border); }
+  .section-label {
+    font-size: 10px; font-weight: 600; letter-spacing: 1px;
+    color: var(--slate); text-transform: uppercase; margin-bottom: 12px;
+  }
+  .section-label-row {
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;
+  }
+  .section-label-row .section-label { margin-bottom: 0; }
+
+  /* Upload */
+  .upload-zone {
+    border: 2px dashed var(--border); border-radius: 8px; padding: 20px 16px;
+    text-align: center; cursor: pointer; transition: border-color 0.2s, background 0.2s;
+    background: rgba(0,0,0,0.15);
+  }
+  .upload-zone:hover, .upload-zone.drag-over { border-color: var(--cyan); background: rgba(0,212,255,0.05); }
+  .upload-icon { font-size: 26px; margin-bottom: 6px; }
+  .upload-text { font-size: 12px; color: var(--slate); line-height: 1.5; }
+  .upload-text strong { color: var(--off-white); display: block; margin-bottom: 2px; font-size: 13px; }
+  .file-types { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; justify-content: center; }
+  .ft-chip {
+    font-size: 9px; font-family: var(--mono); font-weight: 500;
+    background: rgba(136,150,179,0.1); color: var(--slate);
+    border: 1px solid var(--border); border-radius: 3px; padding: 2px 6px;
+  }
+  #fileInput { display: none; }
+  .file-info {
+    display: none; background: rgba(0,212,255,0.06); margin-top: 10px;
+    border: 1px solid rgba(0,212,255,0.2); border-radius: 6px; padding: 10px 12px;
+  }
+  .file-info.visible { display: block; }
+  .fi-name { font-size: 12px; font-weight: 600; color: var(--white); margin-bottom: 4px; }
+  .fi-meta { font-size: 11px; color: var(--slate); font-family: var(--mono); }
+
+  /* Opts */
+  .opt-list { display: flex; flex-direction: column; gap: 8px; }
+  .opt-row { display: flex; align-items: center; justify-content: space-between; }
+  .opt-label { font-size: 12px; color: var(--off-white); }
+  .opt-desc { font-size: 10px; color: var(--slate); margin-top: 1px; }
+  .toggle { position: relative; width: 34px; height: 18px; flex-shrink: 0; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle-track {
+    position: absolute; inset: 0; border-radius: 9px;
+    background: rgba(136,150,179,0.2); cursor: pointer; transition: background 0.2s;
+  }
+  .toggle-track::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 14px; height: 14px; border-radius: 50%; background: var(--slate);
+    transition: transform 0.2s, background 0.2s;
+  }
+  .toggle input:checked + .toggle-track { background: var(--cyan-dim); }
+  .toggle input:checked + .toggle-track::after { transform: translateX(16px); background: var(--white); }
+
+  /* ── Chunker styles ── */
+  .chunker-box {
+    background: rgba(139,92,246,0.07); border: 1px solid rgba(139,92,246,0.25);
+    border-radius: 8px; padding: 12px;
+  }
+  .chunker-toggle-row {
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 0;
+  }
+  .chunker-toggle-label { font-size: 12px; color: var(--off-white); font-weight: 500; }
+  .chunker-body { margin-top: 12px; display: none; }
+  .chunker-body.visible { display: block; }
+  .chunk-size-row {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+  }
+  .chunk-size-label { font-size: 11px; color: var(--slate); flex: 1; }
+  .chunk-size-input {
+    width: 80px; background: rgba(0,0,0,0.25); border: 1px solid var(--border);
+    border-radius: 4px; color: var(--white); font-family: var(--mono);
+    font-size: 12px; padding: 4px 8px; outline: none; text-align: right;
+  }
+  .chunk-size-input:focus { border-color: var(--purple); }
+  .chunk-info-row {
+    font-size: 11px; color: var(--slate); font-family: var(--mono);
+    background: rgba(0,0,0,0.15); border-radius: 4px; padding: 6px 8px;
+    margin-bottom: 10px; display: none;
+  }
+  .chunk-info-row.visible { display: block; }
+  .chunk-nav {
+    display: none; align-items: center; gap: 6px; margin-bottom: 10px;
+  }
+  .chunk-nav.visible { display: flex; }
+  .chunk-nav-label { font-size: 11px; color: var(--off-white); font-family: var(--mono); flex: 1; text-align: center; }
+  .btn-chunk-nav {
+    width: 28px; height: 28px; border-radius: 4px; border: 1px solid var(--border);
+    background: rgba(0,0,0,0.2); color: var(--slate); cursor: pointer;
+    font-size: 14px; display: flex; align-items: center; justify-content: center;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .btn-chunk-nav:hover:not(:disabled) { color: var(--white); border-color: var(--slate); }
+  .btn-chunk-nav:disabled { opacity: 0.3; cursor: not-allowed; }
+  .chunk-progress-track {
+    height: 3px; background: rgba(139,92,246,0.15); border-radius: 2px; margin-bottom: 10px;
+    display: none;
+  }
+  .chunk-progress-track.visible { display: block; }
+  .chunk-progress-fill {
+    height: 100%; background: var(--purple); border-radius: 2px; transition: width 0.3s;
+  }
+  .btn-clean-chunk {
+    width: 100%; padding: 8px; border-radius: 6px;
+    background: var(--purple); color: var(--white); font-weight: 600;
+    font-size: 12px; border: none; cursor: pointer;
+    transition: opacity 0.2s; font-family: var(--sans); display: none;
+  }
+  .btn-clean-chunk.visible { display: block; }
+  .btn-clean-chunk:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-clean-chunk:hover:not(:disabled) { opacity: 0.85; }
+  .btn-merge-chunks {
+    width: 100%; padding: 8px; border-radius: 6px; margin-top: 6px;
+    background: rgba(139,92,246,0.15); color: var(--purple);
+    font-weight: 600; font-size: 12px;
+    border: 1px solid rgba(139,92,246,0.35); cursor: pointer;
+    transition: background 0.2s; font-family: var(--sans); display: none;
+  }
+  .btn-merge-chunks.visible { display: block; }
+  .btn-merge-chunks:hover { background: rgba(139,92,246,0.25); }
+  .chunk-stat {
+    display: inline-block; background: rgba(139,92,246,0.15);
+    color: var(--purple); font-size: 10px; font-family: var(--mono);
+    border-radius: 3px; padding: 1px 5px; margin-left: 4px;
+  }
+
+  /* Buttons */
+  .btn-clean {
+    width: 100%; padding: 10px; border-radius: 6px;
+    background: var(--cyan); color: var(--navy); font-weight: 700;
+    font-size: 13px; letter-spacing: 0.3px; border: none;
+    cursor: pointer; transition: background 0.2s, opacity 0.2s; font-family: var(--sans);
+  }
+  .btn-clean:hover { background: #33DDFF; }
+  .btn-clean:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-secondary {
+    width: 100%; padding: 8px; border-radius: 6px;
+    background: transparent; color: var(--slate); font-size: 12px;
+    border: 1px solid var(--border); cursor: pointer;
+    transition: color 0.2s, border-color 0.2s; font-family: var(--sans);
+  }
+  .btn-secondary:hover { color: var(--off-white); border-color: var(--slate); }
+
+  /* AI Prompt */
+  .ai-prompt-box {
+    width: 100%; background: rgba(0,0,0,0.2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 10px; color: var(--off-white);
+    font-family: var(--sans); font-size: 12px; resize: vertical; min-height: 56px;
+    outline: none; transition: border-color 0.2s;
+  }
+  .ai-prompt-box:focus { border-color: var(--cyan); }
+  .ai-label { font-size: 11px; color: var(--slate); margin-bottom: 6px; display: flex; align-items: center; gap: 5px; }
+  .ai-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.4} }
+
+  /* Right Panel */
+  .panel-right { display: flex; flex-direction: column; overflow: hidden; }
+  .preview-tabs {
+    display: flex; gap: 0; border-bottom: 1px solid var(--border);
+    background: var(--navy-mid); flex-shrink: 0;
+  }
+  .tab-btn {
+    padding: 12px 16px; font-size: 12px; font-weight: 500;
+    color: var(--slate); background: none; border: none;
+    border-bottom: 2px solid transparent; cursor: pointer;
+    transition: color 0.2s; font-family: var(--sans);
+  }
+  .tab-btn.active { color: var(--cyan); border-bottom-color: var(--cyan); }
+  .tab-btn:hover:not(.active) { color: var(--off-white); }
+  .preview-content { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+  .tab-pane { display: none; flex: 1; overflow: auto; }
+  .tab-pane.active { display: flex; flex-direction: column; }
+
+  /* Stats bar */
+  .stats-bar {
+    display: flex; gap: 0; border-bottom: 1px solid var(--border);
+    background: rgba(0,0,0,0.2); flex-shrink: 0; flex-wrap: wrap;
+  }
+  .stat-card { padding: 10px 18px; border-right: 1px solid var(--border); min-width: 90px; }
+  .stat-num { font-family: var(--mono); font-size: 18px; font-weight: 500; color: var(--white); }
+  .stat-lbl { font-size: 10px; color: var(--slate); margin-top: 2px; }
+  .stat-num.green { color: var(--green); }
+  .stat-num.amber { color: var(--amber); }
+  .stat-num.red { color: var(--red); }
+  .stat-num.cyan { color: var(--cyan); }
+  .stat-num.purple { color: var(--purple); }
+
+  /* Table */
+  .table-wrap { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+  .table-scroll { flex: 1; overflow: auto; }
+  .data-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11px; }
+  .data-table thead { position: sticky; top: 0; z-index: 10; }
+  .data-table th {
+    background: var(--navy-light); color: var(--slate); font-weight: 500;
+    padding: 8px 12px; text-align: left; white-space: nowrap;
+    border-bottom: 1px solid var(--border); font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .data-table td {
+    padding: 6px 12px; border-bottom: 1px solid rgba(136,150,179,0.08);
+    white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis;
+    color: var(--off-white);
+  }
+  .data-table tr:hover td { background: rgba(0,212,255,0.04); }
+  .cell-null { color: rgba(239,68,68,0.7) !important; font-style: italic; }
+  .row-num { color: var(--slate) !important; font-size: 10px; user-select: none; }
+  .row-chunk-0 td { background: rgba(139,92,246,0.04); }
+  .row-chunk-1 td { background: rgba(0,212,255,0.03); }
+
+  /* Pagination */
+  .pagination-bar {
+    flex-shrink: 0; display: flex; align-items: center; gap: 6px;
+    padding: 6px 12px; border-top: 1px solid var(--border);
+    background: var(--navy-mid); font-size: 11px; flex-wrap: wrap;
+  }
+  .pg-info { color: var(--slate); font-family: var(--mono); flex: 1; min-width: 120px; }
+  .pg-info strong { color: var(--off-white); }
+  .pg-btns { display: flex; gap: 3px; align-items: center; flex-wrap: wrap; }
+  .btn-pg {
+    height: 24px; min-width: 24px; padding: 0 6px;
+    border-radius: 4px; border: 1px solid var(--border);
+    background: rgba(0,0,0,0.2); color: var(--slate);
+    font-size: 11px; font-family: var(--mono); cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .btn-pg:hover:not(:disabled) { color: var(--white); border-color: var(--slate); }
+  .btn-pg:disabled { opacity: 0.3; cursor: not-allowed; }
+  .btn-pg.active { background: var(--cyan); color: var(--navy); border-color: var(--cyan); font-weight: 700; }
+  .pg-jump {
+    width: 42px; height: 24px; text-align: center; padding: 0 4px;
+    background: rgba(0,0,0,0.2); border: 1px solid var(--border);
+    border-radius: 4px; color: var(--off-white); font-family: var(--mono);
+    font-size: 11px; outline: none; transition: border-color 0.15s;
+  }
+  .pg-jump:focus { border-color: var(--cyan); }
+  .pg-size-select {
+    height: 24px; padding: 0 4px; background: rgba(0,0,0,0.2);
+    border: 1px solid var(--border); border-radius: 4px;
+    color: var(--off-white); font-family: var(--mono); font-size: 11px;
+    outline: none; cursor: pointer;
+  }
+  .pg-ellipsis { color: var(--slate); padding: 0 2px; font-size: 12px; line-height: 24px; }
+
+  /* Log */
+  .log-list { padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+  .log-item {
+    display: flex; gap: 10px; align-items: flex-start;
+    background: rgba(0,0,0,0.15); border-radius: 6px;
+    padding: 8px 12px; border-left: 3px solid var(--border);
+  }
+  .log-item.info { border-left-color: var(--cyan); }
+  .log-item.success { border-left-color: var(--green); }
+  .log-item.warn { border-left-color: var(--amber); }
+  .log-item.error { border-left-color: var(--red); }
+  .log-item.chunk { border-left-color: var(--purple); }
+  .log-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+  .log-text { font-size: 12px; line-height: 1.5; }
+  .log-text strong { color: var(--white); font-weight: 600; }
+  .log-count { font-family: var(--mono); font-size: 10px; color: var(--slate); margin-top: 2px; }
+
+  /* Issues */
+  .issues-grid { padding: 12px; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+  .issue-card { background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 6px; padding: 12px; }
+  .issue-col { font-family: var(--mono); font-size: 11px; color: var(--cyan); margin-bottom: 6px; }
+  .issue-row { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px; }
+  .issue-key { color: var(--slate); }
+  .issue-val { color: var(--off-white); font-family: var(--mono); }
+
+  /* AI */
+  .ai-pane { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .ai-response {
+    background: rgba(0,0,0,0.2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 14px; font-size: 12px; line-height: 1.7;
+    color: var(--off-white); min-height: 100px; white-space: pre-wrap; font-family: var(--sans);
+  }
+  .ai-thinking { color: var(--slate); font-style: italic; }
+
+  /* Empty */
+  .empty-state {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 10px;
+    color: var(--slate); text-align: center; padding: 40px;
+  }
+  .empty-icon { font-size: 40px; opacity: 0.4; }
+  .empty-title { font-size: 15px; font-weight: 500; color: var(--off-white); opacity: 0.6; }
+  .empty-sub { font-size: 12px; line-height: 1.6; max-width: 320px; }
+
+  /* Progress */
+  .progress-bar { height: 2px; background: var(--border); position: relative; overflow: hidden; }
+  .progress-fill {
+    height: 100%; background: linear-gradient(90deg, var(--cyan), #33DDFF);
+    width: 0%; transition: width 0.3s; position: absolute;
+  }
+  .progress-fill.indeterminate { width: 40% !important; animation: slide 1.2s linear infinite; }
+  @keyframes slide { 0%{left:-40%} 100%{left:100%} }
+
+  /* Download bar */
+  .download-bar {
+    display: none; padding: 10px 16px;
+    background: rgba(16,185,129,0.1); border-top: 1px solid rgba(16,185,129,0.25);
+    justify-content: space-between; align-items: center; flex-shrink: 0;
+  }
+  .download-bar.visible { display: flex; }
+  .dl-text { font-size: 12px; color: var(--green); font-weight: 500; }
+  .dl-btns { display: flex; gap: 8px; }
+  .btn-dl {
+    padding: 6px 14px; border-radius: 5px; font-size: 11px; font-weight: 600;
+    cursor: pointer; border: none; font-family: var(--sans); transition: opacity 0.2s;
+  }
+  .btn-dl.csv { background: var(--green); color: #fff; }
+  .btn-dl.json { background: var(--amber); color: var(--navy); }
+  .btn-dl.xlsx { background: #4C6EF5; color: #fff; }
+  .btn-dl:hover { opacity: 0.85; }
+
+  /* DB table selector */
+  .db-selector { display: none; margin-top: 10px; }
+  .db-selector.visible { display: block; }
+  .db-selector-label { font-size: 10px; color: var(--slate); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+  .db-table-list { display: flex; flex-direction: column; gap: 4px; max-height: 160px; overflow-y: auto; }
+  .db-table-btn {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 7px 10px; border-radius: 5px; cursor: pointer;
+    border: 1px solid var(--border); background: rgba(0,0,0,0.15);
+    transition: border-color 0.15s, background 0.15s; text-align: left;
+  }
+  .db-table-btn:hover { border-color: var(--cyan); background: rgba(0,212,255,0.05); }
+  .db-table-btn.active { border-color: var(--cyan); background: rgba(0,212,255,0.08); }
+  .db-table-name { font-size: 12px; color: var(--off-white); font-family: var(--mono); }
+  .db-table-rows { font-size: 10px; color: var(--slate); font-family: var(--mono); }
+  .db-badge {
+    display: inline-block; font-size: 9px; font-family: var(--mono); font-weight: 600;
+    background: rgba(16,185,129,0.15); color: var(--green);
+    border: 1px solid rgba(16,185,129,0.3); border-radius: 3px;
+    padding: 1px 5px; margin-left: 6px; vertical-align: middle;
+  }
+
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--navy-light); border-radius: 3px; }
+
+  @media (max-width: 700px) {
+    .workspace { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    .panel-left { max-height: 55vh; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <span class="logo">Clean<span>Lx</span></span>
+    <span class="badge">WORKBENCH</span>
+    <div class="topbar-right">
+      <span id="statusPill" style="font-size:11px;color:var(--slate);">No file loaded</span>
+    </div>
+  </header>
+
+  <div class="workspace">
+    <aside class="panel-left">
+
+      <!-- Upload -->
+      <div class="panel-section">
+        <div class="section-label">Data Source</div>
+        <div class="upload-zone" id="uploadZone">
+          <div class="upload-icon">⬆</div>
+          <div class="upload-text">
+            <strong>Drop file or click to upload</strong>
+            Files &amp; Databases
+          </div>
+          <div class="file-types">
+            <span class="ft-chip">.csv</span><span class="ft-chip">.tsv</span>
+            <span class="ft-chip">.json</span><span class="ft-chip">.xlsx</span>
+            <span class="ft-chip">.xls</span><span class="ft-chip">.txt</span>
+            <span class="ft-chip" style="color:var(--green);border-color:rgba(16,185,129,0.4)">.db</span>
+            <span class="ft-chip" style="color:var(--green);border-color:rgba(16,185,129,0.4)">.sqlite</span>
+            <span class="ft-chip" style="color:var(--green);border-color:rgba(16,185,129,0.4)">.sql</span>
+          </div>
+        </div>
+        <input type="file" id="fileInput" accept=".csv,.tsv,.json,.xlsx,.xls,.txt,.db,.sqlite,.sqlite3,.sql">
+        <div class="file-info" id="fileInfo">
+          <div class="fi-name" id="fiName">—</div>
+          <div class="fi-meta" id="fiMeta">—</div>
+        </div>
+        <!-- DB table selector (shown only for SQLite / SQL files) -->
+        <div class="db-selector" id="dbSelector">
+          <div class="db-selector-label">Tables in database</div>
+          <div class="db-table-list" id="dbTableList"></div>
+        </div>
+      </div>
+
+      <!-- Cleaning Rules -->
+      <div class="panel-section">
+        <div class="section-label">Cleaning Rules</div>
+        <div class="opt-list" id="optList"></div>
+      </div>
+
+      <!-- Chunker -->
+      <div class="panel-section">
+        <div class="section-label">Large File Chunker</div>
+        <div class="chunker-box">
+          <div class="chunker-toggle-row">
+            <span class="chunker-toggle-label">🔪 Split into chunks</span>
+            <label class="toggle">
+              <input type="checkbox" id="chunkToggle">
+              <span class="toggle-track" style="background:rgba(139,92,246,0.2)"></span>
+            </label>
+          </div>
+          <div class="chunker-body" id="chunkerBody">
+            <div style="font-size:10px;color:var(--slate);margin-bottom:10px;line-height:1.5">
+              Splits large files into smaller batches. Clean each chunk, then merge all cleaned chunks into one file.
+            </div>
+            <div class="chunk-size-row">
+              <span class="chunk-size-label">Rows per chunk</span>
+              <input type="number" class="chunk-size-input" id="chunkSize" value="50000" min="1000" max="500000" step="1000">
+            </div>
+            <div class="chunk-info-row" id="chunkInfoRow">—</div>
+            <div class="chunk-progress-track" id="chunkProgressTrack">
+              <div class="chunk-progress-fill" id="chunkProgressFill" style="width:0%"></div>
+            </div>
+            <div class="chunk-nav" id="chunkNav">
+              <button class="btn-chunk-nav" id="btnChunkPrev" title="Previous chunk">‹</button>
+              <span class="chunk-nav-label" id="chunkNavLabel">Chunk 1 / 1</span>
+              <button class="btn-chunk-nav" id="btnChunkNext" title="Next chunk">›</button>
+            </div>
+            <button class="btn-clean-chunk" id="btnCleanChunk" disabled>Clean This Chunk</button>
+            <button class="btn-merge-chunks" id="btnMergeChunks">⬇ Merge &amp; Download All</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI Assist -->
+      <div class="panel-section">
+        <div class="section-label">AI Assist · Gemini</div>
+        <div class="ai-label"><span class="ai-dot" style="background:var(--green)"></span> Google Gemini — free, no Claude tokens</div>
+        <input type="password" id="geminiKey" placeholder="Paste Gemini API key (aistudio.google.com)"
+          style="width:100%;background:rgba(0,0,0,0.2);border:1px solid var(--border);border-radius:6px;
+                 padding:7px 10px;color:var(--off-white);font-family:var(--mono);font-size:11px;
+                 outline:none;margin-bottom:8px;transition:border-color 0.2s">
+        <div class="ai-label" style="margin-top:4px"><span class="ai-dot"></span> Describe additional cleaning</div>
+        <textarea class="ai-prompt-box" id="aiPromptBox"
+          placeholder="e.g. Standardise dates to YYYY-MM-DD, flag rows where age > 120…"></textarea>
+        <div style="margin-top:6px;font-size:10px;color:var(--slate)">
+          Get a free key at <span style="color:var(--cyan)">aistudio.google.com</span> → Get API key
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="panel-section" style="border-bottom:none">
+        <button class="btn-clean" id="btnClean" disabled>Clean Data</button>
+        <div style="margin-top:8px"></div>
+        <button class="btn-secondary" id="btnReset">Reset</button>
+      </div>
+    </aside>
+
+    <!-- Right Panel -->
+    <main class="panel-right">
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+
+      <div class="preview-tabs">
+        <button class="tab-btn active" data-tab="preview">Preview</button>
+        <button class="tab-btn" data-tab="cleaned">Cleaned</button>
+        <button class="tab-btn" data-tab="chunks">Chunks</button>
+        <button class="tab-btn" data-tab="issues">Issues</button>
+        <button class="tab-btn" data-tab="log">Log</button>
+        <button class="tab-btn" data-tab="ai">AI Report</button>
+      </div>
+
+      <div class="preview-content">
+        <!-- Stats bar -->
+        <div class="stats-bar" id="statsBar" style="display:none">
+          <div class="stat-card"><div class="stat-num cyan" id="sRows">—</div><div class="stat-lbl">Rows</div></div>
+          <div class="stat-card"><div class="stat-num cyan" id="sCols">—</div><div class="stat-lbl">Cols</div></div>
+          <div class="stat-card"><div class="stat-num red" id="sMissing">—</div><div class="stat-lbl">Missing</div></div>
+          <div class="stat-card"><div class="stat-num amber" id="sDupes">—</div><div class="stat-lbl">Dupes</div></div>
+          <div class="stat-card"><div class="stat-num green" id="sFixed">—</div><div class="stat-lbl">Fixed</div></div>
+          <div class="stat-card" id="sChunkCard" style="display:none"><div class="stat-num purple" id="sChunks">—</div><div class="stat-lbl">Chunks</div></div>
+        </div>
+
+        <!-- Preview tab -->
+        <div class="tab-pane active" id="tab-preview">
+          <div class="empty-state" id="emptyPreview">
+            <div class="empty-icon">📂</div>
+            <div class="empty-title">No data loaded</div>
+            <div class="empty-sub">Upload a file to begin. All processing stays in your browser.</div>
+          </div>
+          <div class="table-wrap" id="previewTableWrap" style="display:none"></div>
+        </div>
+
+        <!-- Cleaned tab -->
+        <div class="tab-pane" id="tab-cleaned">
+          <div class="empty-state" id="emptyCleaned">
+            <div class="empty-icon">✨</div>
+            <div class="empty-title">Run the cleaner first</div>
+            <div class="empty-sub">Configure rules on the left, then click Clean Data.</div>
+          </div>
+          <div class="table-wrap" id="cleanedTableWrap" style="display:none"></div>
+        </div>
+
+        <!-- Chunks tab -->
+        <div class="tab-pane" id="tab-chunks">
+          <div class="empty-state" id="emptyChunks">
+            <div class="empty-icon">🔪</div>
+            <div class="empty-title">Chunker not active</div>
+            <div class="empty-sub">Enable "Split into chunks" in the left panel to process large files in batches.</div>
+          </div>
+          <div id="chunksView" style="display:none;flex:1;flex-direction:column;overflow:auto">
+            <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0">
+              <span style="font-size:13px;font-weight:600;color:var(--white)">Chunk Status</span>
+              <span id="chunkSummaryPill" class="chunk-stat">0 / 0 cleaned</span>
+            </div>
+            <div id="chunkGrid" style="padding:12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px"></div>
+          </div>
+        </div>
+
+        <!-- Issues tab -->
+        <div class="tab-pane" id="tab-issues">
+          <div class="empty-state" id="emptyIssues">
+            <div class="empty-icon">🔍</div>
+            <div class="empty-title">No analysis yet</div>
+            <div class="empty-sub">Run the cleaner to see per-column quality metrics.</div>
+          </div>
+          <div class="issues-grid" id="issuesGrid" style="display:none"></div>
+        </div>
+
+        <!-- Log tab -->
+        <div class="tab-pane" id="tab-log">
+          <div class="empty-state" id="emptyLog">
+            <div class="empty-icon">📋</div>
+            <div class="empty-title">Activity log is empty</div>
+            <div class="empty-sub">Cleaning operations will appear here.</div>
+          </div>
+          <div class="log-list" id="logList" style="display:none"></div>
+        </div>
+
+        <!-- AI tab -->
+        <div class="tab-pane" id="tab-ai">
+          <div class="ai-pane">
+            <div style="font-size:12px;color:var(--slate)">AI-generated quality report based on your data.</div>
+            <div class="ai-response" id="aiResponse">
+              <span class="ai-thinking">No AI report yet. Run the cleaner to generate one.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Download bar -->
+      <div class="download-bar" id="downloadBar">
+        <span class="dl-text" id="dlText">✓ Cleaned data ready to export</span>
+        <div class="dl-btns">
+          <button class="btn-dl csv" id="dlCSV">↓ CSV</button>
+          <button class="btn-dl json" id="dlJSON">↓ JSON</button>
+          <button class="btn-dl xlsx" id="dlXLSX">↓ XLSX</button>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════
+   STATE
+═══════════════════════════════════════════ */
+let rawData = [];
+let cleanedData = [];
+let headers = [];
+let fileName = '';
+let fileType = '';
+let logEntries = [];
+let columnIssues = {};
+let downloads = null;
+
+// Chunker state
+let chunks = [];          // array of row arrays (raw)
+let cleanedChunks = [];   // parallel array, null = not yet cleaned
+let currentChunkIdx = 0;
+let chunkModeActive = false;
+
+/* ═══════════════════════════════════════════
+   CLEANING OPTIONS
+═══════════════════════════════════════════ */
+const OPTS = [
+  { id: 'removeDupes',   label: 'Remove duplicates',    desc: 'Drop exact duplicate rows' },
+  { id: 'trimSpaces',    label: 'Trim whitespace',      desc: 'Strip leading/trailing spaces' },
+  { id: 'fixCase',       label: 'Title case text',      desc: 'Capitalise name/text fields' },
+  { id: 'fillMissing',   label: 'Fill missing values',  desc: 'Replace blanks with N/A or 0' },
+  { id: 'removeEmpty',   label: 'Remove empty rows',    desc: 'Drop all-blank rows' },
+  { id: 'fixNumbers',    label: 'Standardise numbers',  desc: 'Strip $ , % from numeric fields' },
+  { id: 'normaliseBool', label: 'Normalise booleans',   desc: 'yes/no/true/false → true/false' },
+  { id: 'fixDates',      label: 'Detect date columns',  desc: 'Flag inconsistent date formats' },
+];
+const optStates = {};
+OPTS.forEach(o => optStates[o.id] = true);
+
+const optList = document.getElementById('optList');
+OPTS.forEach(o => {
+  const row = document.createElement('div');
+  row.className = 'opt-row';
+  row.innerHTML = `
+    <div>
+      <div class="opt-label">${o.label}</div>
+      <div class="opt-desc">${o.desc}</div>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="opt_${o.id}" checked>
+      <span class="toggle-track"></span>
+    </label>`;
+  optList.appendChild(row);
+  row.querySelector('input').addEventListener('change', e => { optStates[o.id] = e.target.checked; });
+});
+
+/* ═══════════════════════════════════════════
+   UPLOAD
+═══════════════════════════════════════════ */
+const uploadZone = document.getElementById('uploadZone');
+const fileInput  = document.getElementById('fileInput');
+
+uploadZone.addEventListener('click', () => fileInput.click());
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag-over'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault(); uploadZone.classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e => { if (e.target.files[0]) processFile(e.target.files[0]); });
+
+/* ── sql.js initialisation (lazy, once) ── */
+let _sqlPromise = null;
+function getSql() {
+  if (!_sqlPromise) {
+    _sqlPromise = initSqlJs({
+      locateFile: f => `https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/${f}`
+    });
+  }
+  return _sqlPromise;
+}
+
+/* ── Active SQLite DB handle (for multi-table switching) ── */
+let _activeDB    = null;
+let _dbTables    = [];   // [{name, rows}]
+let _activeTable = null;
+
+function processFile(file) {
+  fileName = file.name;
+  fileType = file.name.split('.').pop().toLowerCase();
+
+  // Hide DB selector until we know it's a DB
+  document.getElementById('dbSelector').classList.remove('visible');
+  _activeDB = null; _dbTables = []; _activeTable = null;
+
+  const reader = new FileReader();
+
+  if (['xlsx','xls'].includes(fileType)) {
+    reader.onload = e => {
+      try {
+        const wb = XLSX.read(e.target.result, { type:'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        onDataLoaded(XLSX.utils.sheet_to_json(ws, { defval:'' }), file.size);
+      } catch(err) { addLog('error','Parse error','Could not read Excel file'); }
+    };
+    reader.readAsArrayBuffer(file);
+
+  } else if (fileType === 'json') {
+    reader.onload = e => {
+      try {
+        let j = JSON.parse(e.target.result);
+        if (!Array.isArray(j)) j = [j];
+        onDataLoaded(j, file.size);
+      } catch(err) { addLog('error','Parse error','Invalid JSON'); }
+    };
+    reader.readAsText(file);
+
+  } else if (['db','sqlite','sqlite3'].includes(fileType)) {
+    addLog('info','🗄 SQLite detected','Loading database engine…');
+    reader.onload = async e => {
+      try {
+        const SQL = await getSql();
+        const db  = new SQL.Database(new Uint8Array(e.target.result));
+        _activeDB = db;
+        loadSQLiteTables(db, file.size);
+      } catch(err) {
+        addLog('error','SQLite error', err.message || 'Could not open database');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+
+  } else if (fileType === 'sql') {
+    addLog('info','📄 SQL dump detected','Parsing INSERT statements…');
+    reader.onload = e => {
+      try {
+        const rows = parseSQLDump(e.target.result);
+        if (!rows.length) { addLog('error','Parse error','No INSERT rows found in .sql file'); return; }
+        onDataLoaded(rows, file.size);
+      } catch(err) {
+        addLog('error','SQL parse error', err.message || 'Could not parse SQL dump');
+      }
+    };
+    reader.readAsText(file);
+
+  } else {
+    // CSV / TSV / TXT
+    reader.onload = e => {
+      const result = Papa.parse(e.target.result, {
+        header: true, dynamicTyping: false, skipEmptyLines: true,
+        delimiter: fileType === 'tsv' ? '\t' : undefined,
+      });
+      if (!result.data.length) { addLog('error','Parse error','No rows found in file'); return; }
+      onDataLoaded(result.data, file.size);
+    };
+    reader.readAsText(file);
+  }
+}
+
+/* ── Read all user tables from a SQLite DB and show the selector ── */
+function loadSQLiteTables(db, fileSize) {
+  const tablesRes = db.exec(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+  );
+  if (!tablesRes.length || !tablesRes[0].values.length) {
+    addLog('error','SQLite','No user tables found in this database');
+    return;
+  }
+
+  _dbTables = tablesRes[0].values.map(([name]) => {
+    const countRes = db.exec(`SELECT COUNT(*) FROM "${name}"`);
+    const rows = countRes[0]?.values[0]?.[0] ?? 0;
+    return { name, rows };
+  });
+
+  // Update file info
+  document.getElementById('fiName').textContent = fileName;
+  document.getElementById('fiMeta').textContent =
+    `SQLite · ${_dbTables.length} table${_dbTables.length!==1?'s':''} · ${(fileSize/1024).toFixed(1)} KB`;
+  document.getElementById('fileInfo').classList.add('visible');
+
+  // Build table-selector UI
+  const list = document.getElementById('dbTableList');
+  list.innerHTML = '';
+  _dbTables.forEach(t => {
+    const btn = document.createElement('div');
+    btn.className = 'db-table-btn';
+    btn.innerHTML = `
+      <span class="db-table-name">${t.name}</span>
+      <span class="db-table-rows">${t.rows.toLocaleString()} rows</span>`;
+    btn.addEventListener('click', () => loadSQLiteTable(t.name, fileSize, btn));
+    list.appendChild(btn);
+  });
+  document.getElementById('dbSelector').classList.add('visible');
+
+  // Auto-load first table
+  const firstBtn = list.querySelector('.db-table-btn');
+  if (firstBtn) firstBtn.click();
+
+  addLog('info','🗄 Database opened',
+    `${_dbTables.length} table${_dbTables.length!==1?'s':''}: ${_dbTables.map(t=>t.name).join(', ')}`);
+}
+
+/* ── Load a specific SQLite table into the workbench ── */
+function loadSQLiteTable(tableName, fileSize, btn) {
+  _activeTable = tableName;
+  // Highlight active button
+  document.querySelectorAll('.db-table-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+
+  try {
+    const res = _activeDB.exec(`SELECT * FROM "${tableName}"`);
+    if (!res.length) { addLog('warn','Empty table',`"${tableName}" has no rows`); return; }
+    const cols = res[0].columns;
+    const data = res[0].values.map(row => {
+      const obj = {};
+      cols.forEach((c, i) => { obj[c] = row[i] ?? ''; });
+      return obj;
+    });
+    onDataLoaded(data, fileSize, `${fileName} → ${tableName}`);
+    addLog('info',`📋 Table loaded`,`"${tableName}" — ${data.length.toLocaleString()} rows × ${cols.length} cols`);
+  } catch(err) {
+    addLog('error','Table load error', err.message || `Could not query "${tableName}"`);
+  }
+}
+
+/* ── Parse a SQL dump file for INSERT INTO rows ── */
+function parseSQLDump(sql) {
+  const rows = [];
+  let headers = null;
+  let tableName = '';
+
+  // Match multi-value INSERT INTO `table` VALUES (...),(...)
+  const insertRE = /INSERT\s+INTO\s+[`"']?(\w+)[`"']?\s*(?:\(([^)]+)\))?\s*VALUES\s*([\s\S]+?)(?:;|$)/gi;
+  let match;
+
+  while ((match = insertRE.exec(sql)) !== null) {
+    const tbl  = match[1];
+    const cols = match[2] ? match[2].split(',').map(c => c.trim().replace(/[`"']/g,'')) : null;
+    if (!tableName) tableName = tbl;
+    if (tbl !== tableName) continue; // stick to first table if multiple
+
+    // Parse value tuples: (...),(...)
+    const valuesStr = match[3];
+    const tupleRE = /\(([^)]*(?:'[^']*'[^)]*)*)\)/g;
+    let tm;
+    while ((tm = tupleRE.exec(valuesStr)) !== null) {
+      const vals = splitSQLValues(tm[1]);
+      if (!cols && !headers) {
+        // No column list — generate col0, col1…
+        headers = vals.map((_, i) => `col${i}`);
+      } else if (cols && !headers) {
+        headers = cols;
+      }
+      if (headers && vals.length === headers.length) {
+        const obj = {};
+        headers.forEach((h, i) => { obj[h] = cleanSQLVal(vals[i]); });
+        rows.push(obj);
+      }
+    }
+  }
+
+  // Attach table name hint to fileName if found
+  if (tableName) fileName = `${fileName.replace(/\.sql$/i,'')} (${tableName}).sql`;
+  return rows;
+}
+
+function splitSQLValues(str) {
+  const vals = []; let cur = '', inQ = false, qc = '';
+  for (let i = 0; i < str.length; i++) {
+    const c = str[i];
+    if (inQ) { if (c === qc && str[i-1] !== '\\') inQ = false; else cur += c; }
+    else if (c === "'" || c === '"') { inQ = true; qc = c; }
+    else if (c === ',') { vals.push(cur.trim()); cur = ''; }
+    else cur += c;
+  }
+  vals.push(cur.trim());
+  return vals;
+}
+
+function cleanSQLVal(v) {
+  if (!v || v.toUpperCase() === 'NULL') return '';
+  return v.replace(/^['"]|['"]$/g, '');
+}
+
+function onDataLoaded(data, size, displayName) {
+  rawData = data;
+  cleanedData = [];
+  cleanedChunks = [];
+  chunks = [];
+  headers = data.length ? Object.keys(data[0]) : [];
+  const label = displayName || fileName;
+
+  document.getElementById('fiName').textContent = label;
+  document.getElementById('fiMeta').textContent =
+    `${data.length.toLocaleString()} rows · ${headers.length} cols · ${(size/1024).toFixed(1)} KB`;
+  document.getElementById('fileInfo').classList.add('visible');
+  document.getElementById('statusPill').textContent =
+    `${label} · ${data.length.toLocaleString()} rows`;
+  document.getElementById('btnClean').disabled = false;
+
+  renderTable('previewTableWrap','emptyPreview', data, headers);
+  computeStats(data);
+  switchTab('preview');
+  document.getElementById('downloadBar').classList.remove('visible');
+
+  // Auto-suggest chunk mode for large files
+  if (data.length > 100000) {
+    addLog('warn','⚠ Large file detected',
+      `${data.length.toLocaleString()} rows — consider enabling the Chunker for better performance`);
+  }
+
+  addLog('info','📂 File loaded',
+    `${data.length.toLocaleString()} rows × ${headers.length} columns — ${fileName}`);
+
+  // Rebuild chunks if chunk mode is on
+  if (chunkModeActive) rebuildChunks();
+}
+
+/* ═══════════════════════════════════════════
+   CHUNKER
+═══════════════════════════════════════════ */
+const chunkToggle    = document.getElementById('chunkToggle');
+const chunkerBody    = document.getElementById('chunkerBody');
+const chunkSizeInput = document.getElementById('chunkSize');
+const chunkInfoRow   = document.getElementById('chunkInfoRow');
+const chunkNav       = document.getElementById('chunkNav');
+const chunkNavLabel  = document.getElementById('chunkNavLabel');
+const btnChunkPrev   = document.getElementById('btnChunkPrev');
+const btnChunkNext   = document.getElementById('btnChunkNext');
+const btnCleanChunk  = document.getElementById('btnCleanChunk');
+const btnMergeChunks = document.getElementById('btnMergeChunks');
+const chunkProgressTrack = document.getElementById('chunkProgressTrack');
+const chunkProgressFill  = document.getElementById('chunkProgressFill');
+
+chunkToggle.addEventListener('change', () => {
+  chunkModeActive = chunkToggle.checked;
+  chunkerBody.classList.toggle('visible', chunkModeActive);
+  document.getElementById('btnClean').style.display = chunkModeActive ? 'none' : '';
+
+  if (chunkModeActive && rawData.length) rebuildChunks();
+  else clearChunkerUI();
+});
+
+chunkSizeInput.addEventListener('change', () => { if (chunkModeActive && rawData.length) rebuildChunks(); });
+
+function rebuildChunks() {
+  const size = Math.max(1000, parseInt(chunkSizeInput.value) || 50000);
+  chunks = [];
+  cleanedChunks = [];
+  for (let i = 0; i < rawData.length; i += size) {
+    chunks.push(rawData.slice(i, i + size));
+    cleanedChunks.push(null);
+  }
+  currentChunkIdx = 0;
+
+  const total = chunks.length;
+  chunkInfoRow.classList.add('visible');
+  chunkInfoRow.innerHTML =
+    `<b style="color:var(--white)">${total}</b> chunk${total!==1?'s':''} · ` +
+    `${size.toLocaleString()} rows each · last chunk: ${chunks[total-1].length.toLocaleString()} rows`;
+
+  chunkNav.classList.add('visible');
+  chunkProgressTrack.classList.add('visible');
+  btnCleanChunk.classList.add('visible');
+  btnMergeChunks.classList.add('visible');
+  btnCleanChunk.disabled = false;
+
+  document.getElementById('sChunkCard').style.display = '';
+  document.getElementById('sChunks').textContent = total;
+
+  updateChunkNav();
+  renderChunkView();
+  showCurrentChunk();
+  addLog('chunk','🔪 Chunks built',
+    `${total} chunks of ≤${size.toLocaleString()} rows each — navigate and clean one at a time`);
+  switchTab('chunks');
+}
+
+function clearChunkerUI() {
+  chunkInfoRow.classList.remove('visible');
+  chunkNav.classList.remove('visible');
+  chunkProgressTrack.classList.remove('visible');
+  btnCleanChunk.classList.remove('visible');
+  btnMergeChunks.classList.remove('visible');
+  document.getElementById('sChunkCard').style.display = 'none';
+}
+
+function updateChunkNav() {
+  chunkNavLabel.textContent = `Chunk ${currentChunkIdx + 1} / ${chunks.length}`;
+  btnChunkPrev.disabled = currentChunkIdx === 0;
+  btnChunkNext.disabled = currentChunkIdx === chunks.length - 1;
+
+  // Update clean button label
+  const already = cleanedChunks[currentChunkIdx] !== null;
+  btnCleanChunk.textContent = already
+    ? `✓ Re-clean Chunk ${currentChunkIdx + 1}`
+    : `Clean Chunk ${currentChunkIdx + 1}`;
+
+  // Progress fill
+  const done = cleanedChunks.filter(c => c !== null).length;
+  chunkProgressFill.style.width = chunks.length ? (done / chunks.length * 100) + '%' : '0%';
+
+  document.getElementById('chunkSummaryPill').textContent = `${done} / ${chunks.length} cleaned`;
+}
+
+btnChunkPrev.addEventListener('click', () => {
+  if (currentChunkIdx > 0) { currentChunkIdx--; showCurrentChunk(); updateChunkNav(); }
+});
+btnChunkNext.addEventListener('click', () => {
+  if (currentChunkIdx < chunks.length - 1) { currentChunkIdx++; showCurrentChunk(); updateChunkNav(); }
+});
+
+function showCurrentChunk() {
+  if (!chunks.length) return;
+  const data = chunks[currentChunkIdx];
+  renderTable('previewTableWrap','emptyPreview', data, headers, false, currentChunkIdx);
+  switchTab('preview');
+  document.getElementById('statusPill').textContent =
+    `Chunk ${currentChunkIdx+1}/${chunks.length} · ${data.length.toLocaleString()} rows`;
+}
+
+btnCleanChunk.addEventListener('click', async () => {
+  if (!chunks.length) return;
+  btnCleanChunk.disabled = true;
+  btnCleanChunk.textContent = 'Cleaning…';
+  setProgress(true);
+
+  const chunkRaw = chunks[currentChunkIdx];
+  const result = await applyCleaningRules(chunkRaw);
+  cleanedChunks[currentChunkIdx] = result.data;
+
+  // Show cleaned chunk
+  renderTable('cleanedTableWrap','emptyCleaned', result.data, headers);
+  addLog('chunk', `✅ Chunk ${currentChunkIdx+1} cleaned`,
+    `${result.fixed} changes · ${result.data.length.toLocaleString()} rows`);
+  updateChunkNav();
+  renderChunkView();
+  setProgress(false);
+  btnCleanChunk.disabled = false;
+
+  // If all done, show merge button prominent
+  const done = cleanedChunks.filter(c => c !== null).length;
+  if (done === chunks.length) {
+    addLog('success','🎉 All chunks cleaned',`${chunks.length} chunks ready — click Merge & Download`);
+    document.getElementById('dlText').textContent = `✓ ${chunks.length} chunks cleaned — merge to export`;
+    document.getElementById('downloadBar').classList.add('visible');
+  }
+  switchTab('cleaned');
+});
+
+btnMergeChunks.addEventListener('click', async () => {
+  const cleaned = cleanedChunks.filter(c => c !== null);
+  if (!cleaned.length) { addLog('warn','Nothing to merge','Clean at least one chunk first'); return; }
+  cleanedData = cleaned.flat();
+  addLog('success','🔗 Chunks merged',
+    `${cleaned.length} chunks → ${cleanedData.length.toLocaleString()} total rows`);
+  renderTable('cleanedTableWrap','emptyCleaned', cleanedData, headers);
+  document.getElementById('dlText').textContent =
+    `✓ ${cleanedData.length.toLocaleString()} rows merged from ${cleaned.length} chunks`;
+  document.getElementById('downloadBar').classList.add('visible');
+  switchTab('cleaned');
+});
+
+function renderChunkView() {
+  if (!chunks.length) {
+    document.getElementById('chunksView').style.display = 'none';
+    document.getElementById('emptyChunks').style.display = 'flex';
+    return;
+  }
+  document.getElementById('chunksView').style.display = 'flex';
+  document.getElementById('emptyChunks').style.display = 'none';
+  const done = cleanedChunks.filter(c => c !== null).length;
+  document.getElementById('chunkSummaryPill').textContent = `${done} / ${chunks.length} cleaned`;
+
+  const grid = document.getElementById('chunkGrid');
+  grid.innerHTML = '';
+  chunks.forEach((chunk, i) => {
+    const isCleaned = cleanedChunks[i] !== null;
+    const isActive  = i === currentChunkIdx;
+    const card = document.createElement('div');
+    card.style.cssText = `
+      background:${isActive ? 'rgba(139,92,246,0.12)' : 'rgba(0,0,0,0.2)'};
+      border:1px solid ${isActive ? 'rgba(139,92,246,0.5)' : isCleaned ? 'rgba(16,185,129,0.3)' : 'var(--border)'};
+      border-radius:6px; padding:10px; cursor:pointer; transition:border-color 0.15s;
+    `;
+    card.innerHTML = `
+      <div style="font-family:var(--mono);font-size:11px;color:${isActive?'var(--purple)':'var(--slate)'};margin-bottom:4px">
+        Chunk ${i+1}
+      </div>
+      <div style="font-size:12px;font-weight:600;color:var(--white)">${chunk.length.toLocaleString()} rows</div>
+      <div style="margin-top:6px;font-size:10px;color:${isCleaned?'var(--green)':isActive?'var(--cyan)':'var(--slate)'}">
+        ${isCleaned ? '✓ Cleaned' : isActive ? '● Active' : '○ Pending'}
+      </div>`;
+    card.addEventListener('click', () => {
+      currentChunkIdx = i;
+      showCurrentChunk();
+      updateChunkNav();
+      renderChunkView();
+    });
+    grid.appendChild(card);
+  });
+}
+
+/* ═══════════════════════════════════════════
+   CLEANING ENGINE
+═══════════════════════════════════════════ */
+async function applyCleaningRules(inputData) {
+  let data = inputData.map(r => ({...r}));
+  let fixed = 0;
+
+  if (optStates.removeEmpty) {
+    const before = data.length;
+    data = data.filter(row => headers.some(h => row[h] !== null && row[h] !== undefined && row[h] !== ''));
+    fixed += before - data.length;
+  }
+  if (optStates.removeDupes) {
+    const seen = new Set(); const before = data.length;
+    data = data.filter(row => { const k = JSON.stringify(row); if (seen.has(k)) return false; seen.add(k); return true; });
+    fixed += before - data.length;
+  }
+  if (optStates.trimSpaces) {
+    data = data.map(row => {
+      const n = {};
+      headers.forEach(h => { const v = row[h]; if (typeof v === 'string' && v !== v.trim()) { n[h] = v.trim(); fixed++; } else n[h] = v; });
+      return n;
+    });
+  }
+  if (optStates.fixNumbers) {
+    data = data.map(row => {
+      const n = {...row};
+      headers.forEach(h => {
+        const v = row[h];
+        if (typeof v === 'string') {
+          const c = v.replace(/[$,%\s]/g,'');
+          if (c !== '' && !isNaN(Number(c)) && c !== v) { n[h] = c; fixed++; }
+        }
+      });
+      return n;
+    });
+  }
+  if (optStates.normaliseBool) {
+    const T = new Set(['yes','true','1','y','on']);
+    const F = new Set(['no','false','0','n','off']);
+    data = data.map(row => {
+      const n = {...row};
+      headers.forEach(h => {
+        const v = String(row[h]??'').toLowerCase().trim();
+        if (T.has(v) && row[h] !== 'true') { n[h]='true'; fixed++; }
+        else if (F.has(v) && row[h] !== 'false') { n[h]='false'; fixed++; }
+      });
+      return n;
+    });
+  }
+  if (optStates.fixCase) {
+    const textCols = headers.filter(h => {
+      const s = data.slice(0,20).map(r=>r[h]).filter(v=>v&&isNaN(Number(v)));
+      return s.length > 5;
+    });
+    if (textCols.length) {
+      data = data.map(row => {
+        const n={...row};
+        textCols.forEach(h => {
+          const v = row[h];
+          if (typeof v === 'string' && v.length > 1) {
+            const t = v.replace(/\w\S*/g, w => w[0].toUpperCase()+w.slice(1).toLowerCase());
+            if (t !== v) { n[h]=t; fixed++; }
+          }
+        });
+        return n;
+      });
+    }
+  }
+  if (optStates.fillMissing) {
+    const numCols = headers.filter(h => {
+      const vals = data.map(r=>r[h]).filter(v=>v!==null&&v!==undefined&&v!=='');
+      return vals.length>0 && vals.every(v=>!isNaN(Number(v)));
+    });
+    data = data.map(row => {
+      const n={...row};
+      headers.forEach(h => {
+        if (row[h]===null||row[h]===undefined||row[h]==='') { n[h]=numCols.includes(h)?'0':'N/A'; fixed++; }
+      });
+      return n;
+    });
+  }
+  if (optStates.fixDates) {
+    const dp = [/^\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}$/,/^\d{4}-\d{2}-\d{2}/,/^\d{2}-[A-Za-z]{3}-\d{4}$/];
+    const dc = headers.filter(h => {
+      const s = data.slice(0,20).map(r=>r[h]).filter(Boolean);
+      return s.length>2 && s.filter(v=>dp.some(p=>p.test(String(v)))).length > s.length*0.5;
+    });
+    if (dc.length) addLog('warn','📅 Date columns',`${dc.join(', ')} — check format consistency`);
+  }
+
+  return { data, fixed };
+}
+
+/* ═══════════════════════════════════════════
+   FULL CLEAN (non-chunk mode)
+═══════════════════════════════════════════ */
+document.getElementById('btnClean').addEventListener('click', runFullCleaning);
+
+async function runFullCleaning() {
+  if (!rawData.length) return;
+  const btn = document.getElementById('btnClean');
+  btn.disabled = true; btn.textContent = 'Cleaning…';
+  setProgress(true);
+  logEntries = [];
+  document.getElementById('logList').innerHTML = '';
+  document.getElementById('logList').style.display = 'none';
+  document.getElementById('emptyLog').style.display = 'flex';
+
+  addLog('info','🚀 Cleaning started',
+    `${rawData.length.toLocaleString()} rows · ${Object.values(optStates).filter(Boolean).length} rules active`);
+
+  const result = await applyCleaningRules(rawData);
+  cleanedData = result.data;
+
+  // Log rule results
+  if (optStates.removeDupes) addLog('success','♻ Duplicate check','Exact duplicates removed');
+  if (optStates.removeEmpty) addLog('success','🗑 Empty rows','All-blank rows removed');
+  if (optStates.trimSpaces)  addLog('success','✂ Whitespace','Cells trimmed');
+  if (optStates.fixNumbers)  addLog('success','🔢 Numbers','$, commas, % stripped');
+  if (optStates.normaliseBool) addLog('success','☑ Booleans','Standardised to true/false');
+  if (optStates.fixCase)     addLog('success','🔤 Text case','Title case applied to text columns');
+  if (optStates.fillMissing) addLog('success','🔧 Missing values','Blanks filled (0 or N/A)');
+
+  document.getElementById('sFixed').textContent = result.fixed;
+  renderTable('cleanedTableWrap','emptyCleaned', cleanedData, headers);
+  renderIssues();
+  computeStats(rawData);
+  document.getElementById('sFixed').textContent = result.fixed;
+
+  addLog('success','✅ Complete',
+    `${result.fixed} changes · ${cleanedData.length.toLocaleString()} rows output`);
+
+  await runAIReport();
+
+  setProgress(false);
+  btn.disabled = false; btn.textContent = 'Clean Data';
+  document.getElementById('dlText').textContent = '✓ Cleaned data ready to export';
+  document.getElementById('downloadBar').classList.add('visible');
+  switchTab('cleaned');
+}
+
+/* ═══════════════════════════════════════════
+   STATS & ISSUES
+═══════════════════════════════════════════ */
+function computeStats(data) {
+  if (!data.length) return;
+  document.getElementById('statsBar').style.display = 'flex';
+  document.getElementById('sRows').textContent = data.length.toLocaleString();
+  document.getElementById('sCols').textContent = headers.length;
+
+  let missing = 0;
+  data.forEach(row => headers.forEach(h => {
+    if (row[h]===null||row[h]===undefined||row[h]==='') missing++;
+  }));
+  const seen = new Set(); let dupes = 0;
+  data.forEach(row => { const k=JSON.stringify(row); if(seen.has(k))dupes++; else seen.add(k); });
+  document.getElementById('sMissing').textContent = missing.toLocaleString();
+  document.getElementById('sDupes').textContent = dupes.toLocaleString();
+
+  columnIssues = {};
+  headers.forEach(h => {
+    let nullCount = 0; const types = new Set();
+    data.forEach(row => {
+      const v = row[h];
+      if(v===null||v===undefined||v==='') nullCount++;
+      else { if(!isNaN(Number(v))) types.add('number'); else types.add('string'); }
+    });
+    columnIssues[h] = { nullCount, uniqueTypes: types.size, total: data.length };
+  });
+}
+
+function renderIssues() {
+  const grid = document.getElementById('issuesGrid');
+  const empty = document.getElementById('emptyIssues');
+  if (!Object.keys(columnIssues).length) { grid.style.display='none'; empty.style.display='flex'; return; }
+  grid.style.display = 'grid'; empty.style.display = 'none'; grid.innerHTML = '';
+  Object.entries(columnIssues).forEach(([col,info]) => {
+    const pct = ((info.nullCount/info.total)*100).toFixed(1);
+    const card = document.createElement('div');
+    card.className = 'issue-card';
+    card.innerHTML = `
+      <div class="issue-col">${col}</div>
+      <div class="issue-row"><span class="issue-key">Missing</span><span class="issue-val">${info.nullCount} (${pct}%)</span></div>
+      <div class="issue-row"><span class="issue-key">Total rows</span><span class="issue-val">${info.total.toLocaleString()}</span></div>
+      <div class="issue-row"><span class="issue-key">Type mix</span><span class="issue-val">${info.uniqueTypes>1?'⚠ mixed':'✓ uniform'}</span></div>`;
+    grid.appendChild(card);
+  });
+}
+
+/* ═══════════════════════════════════════════
+   TABLE RENDER — PAGINATED
+═══════════════════════════════════════════ */
+const tablePageState = {};
+
+function renderTable(wrapId, emptyId, data, cols, showDiff=false, chunkIdx=null) {
+  const wrap  = document.getElementById(wrapId);
+  const empty = document.getElementById(emptyId);
+  if (!data.length) { wrap.style.display='none'; if(empty) empty.style.display='flex'; return; }
+  wrap.style.display = 'flex';
+  if (empty) empty.style.display = 'none';
+
+  // Init page state per table; reset to p0 when dataset changes length
+  if (!tablePageState[wrapId]) tablePageState[wrapId] = { page:0, pageSize:100, _lastLen:-1 };
+  const st = tablePageState[wrapId];
+  if (st._lastLen !== data.length) { st.page = 0; st._lastLen = data.length; }
+
+  const totalPages = Math.max(1, Math.ceil(data.length / st.pageSize));
+  if (st.page >= totalPages) st.page = totalPages - 1;
+
+  const start = st.page * st.pageSize;
+  const end   = Math.min(start + st.pageSize, data.length);
+  const rows  = data.slice(start, end);
+
+  // Table
+  let thtml = '<table class="data-table"><thead><tr><th>#</th>';
+  cols.forEach(h => thtml += `<th title="${h}">${h}</th>`);
+  thtml += '</tr></thead><tbody>';
+  rows.forEach((row, i) => {
+    const rc = chunkIdx !== null ? `row-chunk-${chunkIdx % 2}` : '';
+    thtml += `<tr class="${rc}"><td class="row-num">${start+i+1}</td>`;
+    cols.forEach(h => {
+      const v = row[h], isEmpty = v===null||v===undefined||v==='';
+      const d = isEmpty ? 'NULL' : String(v);
+      thtml += `<td class="${isEmpty?'cell-null':''}" title="${d}">${d.substring(0,80)}</td>`;
+    });
+    thtml += '</tr>';
+  });
+  thtml += '</tbody></table>';
+
+  // Pagination bar — only when data exceeds one page
+  let paginationHTML = '';
+  if (data.length > st.pageSize) {
+    // Build page buttons with ellipsis window
+    let pgBtns = `<button class="btn-pg" id="${wrapId}_prev" ${st.page===0?'disabled':''}>‹</button>`;
+    const W = 7; // max visible page buttons
+    if (totalPages <= W + 2) {
+      for (let p=0; p<totalPages; p++)
+        pgBtns += `<button class="btn-pg${p===st.page?' active':''}" data-pg="${p}">${p+1}</button>`;
+    } else {
+      pgBtns += `<button class="btn-pg${st.page===0?' active':''}" data-pg="0">1</button>`;
+      const ws = Math.max(1, st.page-2), we = Math.min(totalPages-2, st.page+2);
+      if (ws > 1) pgBtns += `<span class="pg-ellipsis">…</span>`;
+      for (let p=ws; p<=we; p++)
+        pgBtns += `<button class="btn-pg${p===st.page?' active':''}" data-pg="${p}">${p+1}</button>`;
+      if (we < totalPages-2) pgBtns += `<span class="pg-ellipsis">…</span>`;
+      pgBtns += `<button class="btn-pg${st.page===totalPages-1?' active':''}" data-pg="${totalPages-1}">${totalPages}</button>`;
+    }
+    pgBtns += `<button class="btn-pg" id="${wrapId}_next" ${st.page===totalPages-1?'disabled':''}>›</button>`;
+
+    paginationHTML = `
+      <div class="pagination-bar">
+        <span class="pg-info">Rows <strong>${(start+1).toLocaleString()}–${end.toLocaleString()}</strong> of <strong>${data.length.toLocaleString()}</strong></span>
+        <div class="pg-btns" id="${wrapId}_pgBtns">${pgBtns}</div>
+        <span style="color:var(--slate);font-size:11px">Go</span>
+        <input class="pg-jump" id="${wrapId}_pgJump" type="number" min="1" max="${totalPages}" value="${st.page+1}">
+        <select class="pg-size-select" id="${wrapId}_pgSize">
+          ${[50,100,200,500].map(n=>`<option value="${n}"${st.pageSize===n?' selected':''}>${n}/pg</option>`).join('')}
+        </select>
+      </div>`;
+  }
+
+  wrap.innerHTML = `<div class="table-scroll">${thtml}</div>${paginationHTML}`;
+
+  // Wire events
+  if (data.length > st.pageSize) {
+    document.getElementById(`${wrapId}_prev`).addEventListener('click', () => { st.page--; renderTable(wrapId,emptyId,data,cols,showDiff,chunkIdx); });
+    document.getElementById(`${wrapId}_next`).addEventListener('click', () => { st.page++; renderTable(wrapId,emptyId,data,cols,showDiff,chunkIdx); });
+    document.getElementById(`${wrapId}_pgBtns`).addEventListener('click', e => {
+      const pg = e.target.dataset.pg;
+      if (pg !== undefined) { st.page = parseInt(pg); renderTable(wrapId,emptyId,data,cols,showDiff,chunkIdx); }
+    });
+    document.getElementById(`${wrapId}_pgJump`).addEventListener('change', e => {
+      st.page = Math.max(0, Math.min(totalPages-1, parseInt(e.target.value||1)-1));
+      renderTable(wrapId,emptyId,data,cols,showDiff,chunkIdx);
+    });
+    document.getElementById(`${wrapId}_pgSize`).addEventListener('change', e => {
+      st.pageSize = parseInt(e.target.value); st.page = 0;
+      renderTable(wrapId,emptyId,data,cols,showDiff,chunkIdx);
+    });
+  }
+}
+
+/* ═══════════════════════════════════════════
+   AI REPORT — powered by Gemini (free)
+═══════════════════════════════════════════ */
+async function runAIReport() {
+  const aiBox      = document.getElementById('aiResponse');
+  const userPrompt = document.getElementById('aiPromptBox').value.trim();
+  const apiKey     = (document.getElementById('geminiKey').value || '').trim();
+
+  aiBox.innerHTML = '<span class="ai-thinking">Generating AI report…</span>';
+
+  // Build dataset summary (compact — not the raw rows)
+  const summary = {
+    fileName, rows: rawData.length, cols: headers.length,
+    columns: headers, sampleRow: rawData[0] || {}, missingCounts: {},
+    userInstructions: userPrompt || 'None provided',
+    cleanedRows: cleanedData.length
+  };
+  headers.forEach(h => {
+    const n = rawData.filter(r => r[h]===null||r[h]===undefined||r[h]==='').length;
+    if (n) summary.missingCounts[h] = n;
+  });
+
+  const prompt = `You are a data quality expert. Analyse this dataset summary and provide a concise report.
+
+Dataset summary: ${JSON.stringify(summary, null, 2)}
+
+Provide:
+1. **Data Quality Score** (0-100) with brief justification
+2. **Key Issues Found** (bullet list, max 5)
+3. **Cleaning Applied** (what was done automatically)
+4. **Remaining Recommendations** (actionable next steps)
+5. **Columns of Concern** (if any)
+${userPrompt ? `6. **Custom Request**: Address this: "${userPrompt}"` : ''}
+
+Be concise and practical.`;
+
+  // ── Try Gemini API ──
+  if (apiKey) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.3, maxOutputTokens: 1024 }
+          })
+        }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        const msg = err?.error?.message || `HTTP ${res.status}`;
+        throw new Error(msg);
+      }
+      const data = await res.json();
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (text) { aiBox.textContent = text; return; }
+      throw new Error('Empty response from Gemini');
+    } catch(e) {
+      aiBox.textContent = `⚠ Gemini error: ${e.message}\n\nFalling back to local report below.\n\n` + localFallbackReport(userPrompt);
+      return;
+    }
+  }
+
+  // ── No API key — local fallback report ──
+  aiBox.innerHTML = `<span class="ai-thinking">No Gemini API key provided — showing local report.\nAdd your key in the AI Assist panel (free at aistudio.google.com).</span>\n\n` + localFallbackReport(userPrompt);
+}
+
+function localFallbackReport(userPrompt) {
+  const nullCols = Object.entries(columnIssues)
+    .filter(([,v])=>v.nullCount>0).map(([k,v])=>`${k} (${v.nullCount} missing)`).join(', ') || 'None';
+  return `Data Quality Report — ${fileName}
+
+✅ Cleaning complete. ${cleanedData.length.toLocaleString()} rows processed.
+
+Key findings:
+• Columns with missing data: ${nullCols}
+• Columns analysed: ${headers.join(', ')}
+• Original rows: ${rawData.length.toLocaleString()} → Output: ${cleanedData.length.toLocaleString()}
+
+Recommendations:
+• Verify date column formats match your target schema
+• Review N/A fills for accuracy in analytical context
+• Confirm numeric columns are correctly typed post-clean
+${userPrompt ? `\nCustom request: ${userPrompt}\n→ Review the cleaned output and apply domain-specific rules manually.` : ''}`;
+}
+
+/* ═══════════════════════════════════════════
+   DOWNLOADS
+═══════════════════════════════════════════ */
+async function initDownloads() { try { downloads = await claude.use('downloads'); } catch(e) {} }
+initDownloads();
+
+document.getElementById('dlCSV').addEventListener('click', async () => {
+  const data = mergedOrCleaned();
+  if (!data.length) return;
+  await saveFile(new Blob([Papa.unparse(data)],{type:'text/csv'}), baseName()+'_cleaned.csv');
+});
+document.getElementById('dlJSON').addEventListener('click', async () => {
+  const data = mergedOrCleaned();
+  if (!data.length) return;
+  await saveFile(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}), baseName()+'_cleaned.json');
+});
+document.getElementById('dlXLSX').addEventListener('click', async () => {
+  const data = mergedOrCleaned();
+  if (!data.length) return;
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Cleaned');
+  const buf = XLSX.write(wb, { bookType:'xlsx', type:'array' });
+  await saveFile(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}), baseName()+'_cleaned.xlsx');
+});
+
+function mergedOrCleaned() {
+  if (chunkModeActive) {
+    const c = cleanedChunks.filter(x=>x!==null);
+    return c.length ? c.flat() : [];
+  }
+  return cleanedData;
+}
+function baseName() { return fileName.replace(/\.\w+$/,''); }
+
+async function saveFile(blob, name) {
+  if (downloads) { try { await downloads.save({ filename: name, data: blob }); return; } catch(e) {} }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/* ═══════════════════════════════════════════
+   LOG
+═══════════════════════════════════════════ */
+function addLog(type, title, detail) {
+  const icons = { info:'ℹ️', success:'✅', warn:'⚠️', error:'❌', chunk:'🔪' };
+  logEntries.push({ type, title, detail });
+  const list = document.getElementById('logList');
+  list.style.display = 'flex';
+  document.getElementById('emptyLog').style.display = 'none';
+  const item = document.createElement('div');
+  item.className = `log-item ${type}`;
+  item.innerHTML = `
+    <span class="log-icon">${icons[type]||'•'}</span>
+    <div>
+      <div class="log-text"><strong>${title}</strong></div>
+      <div class="log-count">${detail}</div>
+    </div>`;
+  list.appendChild(item);
+}
+
+/* ═══════════════════════════════════════════
+   TABS
+═══════════════════════════════════════════ */
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+});
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
+}
+
+/* ═══════════════════════════════════════════
+   PROGRESS
+═══════════════════════════════════════════ */
+function setProgress(on) {
+  const fill = document.getElementById('progressFill');
+  if (on) fill.classList.add('indeterminate');
+  else { fill.classList.remove('indeterminate'); fill.style.width = '0'; }
+}
+
+/* ═══════════════════════════════════════════
+   RESET
+═══════════════════════════════════════════ */
+document.getElementById('btnReset').addEventListener('click', () => {
+  rawData=[]; cleanedData=[]; headers=[]; fileName=''; logEntries=[];
+  chunks=[]; cleanedChunks=[]; currentChunkIdx=0;
+  _activeDB=null; _dbTables=[]; _activeTable=null;
+  delete tablePageState['previewTableWrap'];
+  delete tablePageState['cleanedTableWrap'];
+  document.getElementById('dbSelector').classList.remove('visible');
+  document.getElementById('dbTableList').innerHTML='';
+  chunkToggle.checked = false; chunkModeActive = false;
+  chunkerBody.classList.remove('visible');
+  document.getElementById('btnClean').style.display = '';
+  clearChunkerUI();
+
+  document.getElementById('fileInfo').classList.remove('visible');
+  document.getElementById('statusPill').textContent = 'No file loaded';
+  document.getElementById('btnClean').disabled = true;
+  document.getElementById('statsBar').style.display = 'none';
+  document.getElementById('downloadBar').classList.remove('visible');
+  ['previewTableWrap','cleanedTableWrap'].forEach(id => document.getElementById(id).style.display='none');
+  ['emptyPreview','emptyCleaned'].forEach(id => document.getElementById(id).style.display='flex');
+  document.getElementById('issuesGrid').style.display='none';
+  document.getElementById('emptyIssues').style.display='flex';
+  document.getElementById('logList').innerHTML='';
+  document.getElementById('logList').style.display='none';
+  document.getElementById('emptyLog').style.display='flex';
+  document.getElementById('aiResponse').innerHTML='<span class="ai-thinking">No AI report yet. Run the cleaner to generate one.</span>';
+  document.getElementById('aiPromptBox').value='';
+  document.getElementById('chunkGrid').innerHTML='';
+  document.getElementById('chunksView').style.display='none';
+  document.getElementById('emptyChunks').style.display='flex';
+  fileInput.value='';
+  switchTab('preview');
+});
+</script>
+</body>
+</html>
